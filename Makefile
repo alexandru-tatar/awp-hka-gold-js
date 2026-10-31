@@ -24,8 +24,9 @@ lint:    ## Regeln prüfen (ESLint, Portal-Bibliothek)
 docker:  ## Container bauen
 	docker build --tag $(IMAGE) .
 
+# Gleicht package-lock.json mit package.json ab und ändert keine Versionen. Update: Version in package.json ändern, dann make lock.
 lock:    ## Abhängigkeiten neu festschreiben (package-lock.json)
-	npm update --package-lock-only
+	npm install --package-lock-only --no-audit --no-fund
 
 sdk-update: ## Portal-Bibliothek (platform_sdk/) durch die freigegebene Kopie ersetzen
 	@test -f $(SDK_DIST)/SHA256 || { echo "Keine SDK-Kopie in $(SDK_DIST). Im Portal-Repository: make sdk-release"; exit 1; }
