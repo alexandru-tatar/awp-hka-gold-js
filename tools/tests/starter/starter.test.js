@@ -204,6 +204,14 @@ pruefung(
   { cases: TEMPLATES },
 );
 
+pruefung("Vorlagen und CSS", "Nunjucks mit autoescape, kein autoescape-Aus in Vorlagen", ["R-DES-4"], () => {
+  const routes = readText("src/routes.js");
+  assert.match(routes, /nunjucks\.configure\(.*autoescape:\s*true/, "R-DES-4: autoescape ist nicht eingeschaltet");
+  for (const file of TEMPLATES) {
+    assert.ok(!/\{%-?\s*autoescape\s+false/.test(fs.readFileSync(file, "utf-8")), `R-DES-4: autoescape aus in ${rel(file)}`);
+  }
+});
+
 pruefung("Vorlagen und CSS", "CSS nur mit Variablen, ohne externe Quellen", ["R-DES-1", "R-DES-3", "R-A11Y-2"], (file) => {
   const css = fs.readFileSync(file, "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
   assert.ok(!/#[0-9a-fA-F]{3,8}\b|\b(rgb|rgba|hsl|hsla)\(/.test(css), "R-DES-1: Farbwert (#…, rgb(…), hsl(…)) im eigenen CSS");
