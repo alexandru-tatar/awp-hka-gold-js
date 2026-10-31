@@ -1,0 +1,2 @@
+# Portal-Bibliothek byteweise unverändert lassen (Prüfsumme, PF-103): keine Umwandlung der Zeilenenden
+platform_sdk/** -text
