@@ -1,0 +1,11 @@
+# Nur platform_sdk/, src/, manifest.json, package.json und package-lock.json gehoeren in den Build-Kontext
+.git
+.env
+.env.*
+node_modules
+coverage
+build
+tests
+tools
+.devcontainer
+.agents
