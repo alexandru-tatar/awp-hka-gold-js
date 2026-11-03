@@ -29,6 +29,7 @@ Die App läuft im HKA Portal. Das Portal meldet die Person an, zeichnet den Seit
 6. **Unverändert lassen:** `/healthz` und den Ordner `platform_sdk/`.
 7. **Keine Cookies:** Die App setzt und liest keine. Zustand liegt auf dem Server, nicht beim Browser.
 8. **Keine Login-Bibliotheken:** zum Beispiel `passport`, `jsonwebtoken`, `bcrypt`, `express-session`, `cookie-parser`.
+9. **Dateien des Starters behalten:** Schreiben Sie die erste Seite in die vorhandene Vorlage `src/views/page.njk` und die Routen in `src/routes.js`. Weitere Seiten legen Sie als neue Dateien daneben an. Benennen oder löschen Sie `src/app.js`, `src/routes.js`, `src/server.js`, `src/views/page.njk`, `src/static/app.css` und `tests/app.test.js` nicht. Der Selbsttest und die Pipeline erwarten diese Dateien.
 
 ```js
 const portal = Portal.fromEnv();
@@ -106,4 +107,5 @@ A = automatisch, H = halbautomatisch (eine Person bestätigt), M = manuell (eine
 - [ ] `manifest.json` ist vollständig, die Rollen sind so klein wie möglich
 - [ ] `/healthz` und `platform_sdk/` sind unverändert
 - [ ] Keine Cookies
+- [ ] Die Dateien des Starters sind noch da, nichts ist umbenannt (`src/views/page.njk`, `src/routes.js`, `tests/app.test.js`)
 - [ ] `make lint` und `make test` laufen ohne Fehler
