@@ -5,19 +5,20 @@
  *
  * Ersetzt die Ausgabe von node:test durch einen deutschen Bericht: Prüfbereiche, jede Prüfung mit
  * Ergebnis, alle 40 Einzelregeln mit Stand, Gesamtergebnis. Der Bericht wird zusätzlich als
- * Markdown in `build/pruefberichte/` abgelegt (Nachweis für das Prüfprotokoll).
+ * Markdown in `build/pruefberichte/` abgelegt, im Aufbau der Confluence-Vorlage „Prüfnachweis“
+ * (Vorlage B und Checkliste Code-Review, siehe pruefnachweis.js). Eine JSON-Zusammenfassung
+ * daneben nutzt `make check` für den gemeinsamen Prüfnachweis.
  *
  * Jeder Test trägt einen Namen der Form "Bereich | Titel | Regel, Regel | Fall" (siehe `pruefung` in common.js).
  * Aufruf: make check-skills, make check-starter (JUnit-XML für die Pipeline erzeugt der eingebaute Reporter).
  */
 
-const cp = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const { ROOT, SKILL_NAMES, SKILLS_DIR, loadSkill } = require("./common");
+const nachweis = require("./pruefnachweis");
 
 const WIDTH = 100;
-const REPORT_DIR = path.join(ROOT, "build", "pruefberichte");
 const MARK = { passed: "✔", failed: "✘", skipped: "○" };
 const COLOR = { passed: "\x1b[32m", failed: "\x1b[31m", skipped: "\x1b[33m", bold: "\x1b[1m", reset: "\x1b[0m" };
 
@@ -29,14 +30,6 @@ function loadRules() {
     for (const [id, text, stufe] of skill.table("Regeln")) rules.push({ id, text, stufe, pruefart: art[id] ?? "", skill: name });
   }
   return rules;
-}
-
-function gitState() {
-  const run = (args) => cp.spawnSync("git", args, { cwd: ROOT, encoding: "utf-8" });
-  const head = run(["rev-parse", "--short", "HEAD"]);
-  if (head.error) return "unbekannt";
-  if (head.status !== 0) return "ohne Commit";
-  return head.stdout.trim() + (run(["status", "--porcelain"]).stdout.trim() ? " (mit lokalen Änderungen)" : " (sauber)");
 }
 
 const clean = (text) => text.replaceAll("`", "");
@@ -58,6 +51,7 @@ class Bericht {
     // Der Aufruf nennt die Testdatei: tools/tests/skills/skills.test.js oder tools/tests/starter/starter.test.js
     this.mode = process.argv.some((a) => a.includes("skills.test.js")) ? "skills" : "starter";
     this.started = Date.now();
+    this.git = nachweis.gitInfo();
   }
 
   add(data, outcome) {
@@ -98,7 +92,7 @@ class Bericht {
     add(` HKA Portal · Golden Master JavaScript · ${this.titel}`, "bold");
     add(double, "bold");
     add(` Datum            ${two(now.getDate())}.${two(now.getMonth() + 1)}.${now.getFullYear()}, ${two(now.getHours())}:${two(now.getMinutes())} Uhr`);
-    add(` Repository       ${path.basename(ROOT)} · Stand ${gitState()}`);
+    add(` Repository       ${path.basename(ROOT)} · Stand ${this.git.stand}`);
     add(` Skills           Version ${skillsVersion ? skillsVersion[1] : "?"}`);
     add(` Portal-SDK       Version ${sdkVersion}`);
     add(single);
@@ -185,17 +179,39 @@ class Bericht {
     return named.size ? named.has(ruleId) : true;
   }
 
+  summary(lines) {
+    const all = [...this.checks.values()];
+    const fehler = all.filter((c) => c.outcome === "failed").length;
+    return {
+      art: this.mode,
+      titel: this.titel,
+      stand: this.git.stand,
+      ergebnis: fehler ? "NICHT BESTANDEN" : "BESTANDEN",
+      pruefungen: all.length,
+      einzelfaelle: all.reduce((sum, c) => sum + c.cases, 0),
+      fehler,
+      uebersprungen: all.filter((c) => c.outcome === "skipped").length,
+      regeln: Object.fromEntries(loadRules().map((r) => [r.id, this.ruleOutcome(r)])),
+      bericht: lines.map(([text]) => text),
+    };
+  }
+
   save(lines) {
-    fs.mkdirSync(REPORT_DIR, { recursive: true });
-    const d = new Date();
-    const two = (n) => String(n).padStart(2, "0");
+    const zeit = new Date();
     const slug = this.titel.toLowerCase().replaceAll(" ", "-").replaceAll("ü", "ue").replaceAll("ä", "ae").replaceAll("ö", "oe");
-    const stamp = `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}_${two(d.getHours())}-${two(d.getMinutes())}-${two(d.getSeconds())}`;
-    const file = path.join(REPORT_DIR, `${slug}-${stamp}.md`);
-    const body = `# ${this.titel}\n\n\`\`\`text\n${lines.map(([text]) => text).join("\n")}\n\`\`\`\n`;
-    fs.writeFileSync(file, body, "utf-8");
-    fs.writeFileSync(path.join(REPORT_DIR, `${slug}-aktuell.md`), body, "utf-8");
-    return file;
+    const bericht = this.summary(lines);
+    const datei = nachweis.dateiFuer(slug, zeit);
+    const { markdown } = nachweis.render({
+      titel: this.mode === "skills" ? "Skills" : "Starter",
+      befehle: [`make check-${this.mode}`],
+      berichte: [bericht],
+      nebenlaeufe: {},
+      zeit,
+      datei,
+      git: this.git,
+    });
+    nachweis.schreibe(slug, zeit, `${JSON.stringify({ ...bericht, datei }, null, 2)}\n`, "json");
+    return nachweis.schreibe(slug, zeit, markdown);
   }
 }
 
