@@ -2,6 +2,12 @@
 
 Golden Master für Portal-Apps in JavaScript (Express). Der Starter enthält eine leere Seite; Ihre App bauen Sie darauf auf.
 
+## Entwickeln im DevContainer
+
+Für die Entwicklung empfehlen wir den vorbereiteten DevContainer. Node.js, npm und Make müssen dafür nicht auf dem eigenen Rechner installiert werden. Die Einrichtung und Nutzung beschreibt die [DevContainer-Anleitung](.devcontainer/README.md).
+
+## Projekt konfigurieren
+
 Zuerst in `manifest.json` Name, Kurzname (`slug`), Kategorie, Menü und Rollen eintragen.
 
 ## Befehle
@@ -12,9 +18,7 @@ Zuerst in `manifest.json` Name, Kurzname (`slug`), Kategorie, Menü und Rollen e
 | `make start` | App wie im Betrieb starten (ohne Test-Anmeldung) |
 | `make test` | automatische Tests (Jest) |
 | `make lint` | Regeln prüfen (ESLint, Portal-Bibliothek) |
-| `make docker` | Container bauen |
-
-Voraussetzung: Node.js 24 (siehe `.nvmrc`) und npm. Einmalig die Abhängigkeiten laden: `npm ci`.
+| `make docker` | Produktionscontainer bauen; benötigt Docker auf dem Host und wird auf dem Host ausgeführt, nicht im DevContainer. |
 
 ## Aufbau
 
