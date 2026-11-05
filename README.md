@@ -29,7 +29,7 @@ src/routes.js          Seiten der App
 src/views/             Nunjucks-Vorlagen (nur Seiteninhalt)
 src/static/app.css     eigenes CSS (nur Variablen des Portals)
 tests/                 Tests (Jest)
-platform_sdk/          Portal-Bibliothek (verwaltet, nicht ändern; vorläufige Fassung 1.0.0-dev)
+platform_sdk/          Portal-Bibliothek (verwaltet, nicht ändern; vorläufige Fassung 1.0.1-dev)
 .agents/skills/        Regeln für die KI
 ```
 
