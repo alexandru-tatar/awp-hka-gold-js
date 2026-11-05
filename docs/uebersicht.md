@@ -10,6 +10,7 @@ Golden Master für Portal-Apps: JavaScript (Express). Diese Seite zeigt, was wo 
 |---|---|
 | [`README.md`](../README.md) | Befehle, Aufbau, Wartung, Selbsttests des Starters |
 | [`.agents/skills/README.md`](../.agents/skills/README.md) | Regeln für die KI |
+| [`pipeline.md`](pipeline.md) | Prüfung bei Pull Requests (GitHub Actions): Auslöser, Prüfschritte, Ergebnis, Vorgehen bei Rot |
 | [`betrieb/betriebsanleitung.md`](betrieb/betriebsanleitung.md) | Betriebsanleitung: Start, Stopp, Neustart, Fehlerfall, Aktualisieren, Zurücksetzen, Beenden, Sichern |
 | [`adr/index.md`](adr/index.md) | Index der Architekturentscheidungen, Verweis auf Confluence |
 | [`adr/0000-vorlage.md`](adr/0000-vorlage.md) | Vorlage für eine neue Entscheidung |
