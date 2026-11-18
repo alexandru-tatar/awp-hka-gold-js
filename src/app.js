@@ -15,6 +15,7 @@ function createApp(portal = Portal.fromEnv()) {
   portal.install(app); // Anmeldung und /healthz: vor allen Routen, nicht entfernen
   app.use(portal.url("/static"), express.static(path.join(__dirname, "static")));
   app.use(portal.url("/"), buildRouter(portal));
+  portal.handleErrors(app); // Standardbehandlung nicht abgefangener Fehler: nach allen Routen, nicht entfernen
   return app;
 }
 

@@ -57,6 +57,8 @@ router.get("/", async (req, res) => {
 
 Die Vorlage zeigt bei `problem` den Text `problem.text` samt Nummer. Bei einer leeren Liste zeigt sie „Es liegen noch keine Noten vor.“ Wie die Liste im Ergebnis heißt (hier `items`), steht in `platform_sdk/adapters/noten/README.md`.
 
+Behandle jeden Fehlertyp, bei dem die Person etwas anderes tun soll, mit eigenem Text (Tabelle ‚empfohlene Reaktion' im README des Systems). Das SDK zeigt bei nicht behandelten Fehlern nur eine allgemeine Meldung – das ist ein Sicherheitsnetz, kein Ersatz für die eigene Behandlung.
+
 Für Anzeigen gibt es fertige Hilfen ohne HTML in `platform_sdk/common/`: Zeitpunkte (`dates.formatDatetime`), Dateigrößen (`sizes.formatSize`) und Download-Header (`downloads.downloadHeaders`). Für bwSync&Share prüft `platform_sdk/adapters/bwsync/paths.js` Namen und Pfade und liefert die Pfadleiste als Daten (`breadcrumbs`); das HTML dazu baut die App.
 
 Verbotene Wege, die `make lint` meldet: `fetch`, `axios`, `node-fetch`, `got`, `undici`, `node:http` und `node:https`.
