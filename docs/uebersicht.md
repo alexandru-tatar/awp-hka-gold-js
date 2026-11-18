@@ -23,5 +23,4 @@ Der Starter hat keine eigenen Diagramme. Das C4-Diagramm liegt im Portal-Reposit
 
 Diese Pfade erzeugt später die Plattform. Legen Sie dort nichts von Hand an:
 
-- `docs/schnittstellen/*.md`
 - `docs/fehlercodes.md`
