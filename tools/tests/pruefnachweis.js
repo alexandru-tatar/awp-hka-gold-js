@@ -63,7 +63,8 @@ const two = (n) => String(n).padStart(2, "0");
 const datum = (d) => `${two(d.getDate())}.${two(d.getMonth() + 1)}.${d.getFullYear()}`;
 const uhrzeit = (d) => `${datum(d)}, ${two(d.getHours())}:${two(d.getMinutes())} Uhr`;
 const stempel = (d) => `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}_${two(d.getHours())}-${two(d.getMinutes())}-${two(d.getSeconds())}`;
-const rel = (file) => path.relative(ROOT, file).split(path.sep).join("/");
+// Ordner außerhalb des Repositories (Selbsttest des Prüfnachweises): vollständiger Pfad
+const rel = (file) => (path.relative(ROOT, file).startsWith("..") ? file : path.relative(ROOT, file)).split(path.sep).join("/");
 
 function git(args) {
   const result = cp.spawnSync("git", args, { cwd: ROOT, encoding: "utf-8" });
@@ -72,9 +73,9 @@ function git(args) {
 
 /** Commit, Zustand und eigene Commits gegenüber dem Zielzweig (main oder GITHUB_BASE_REF). */
 function gitInfo() {
-  if (git(["rev-parse", "--git-dir"]) === null) return { stand: "unbekannt", commit: null, commits: null, basis: null };
+  if (git(["rev-parse", "--git-dir"]) === null) return { stand: "unbekannt", commit: null, sauber: null, commits: null, basis: null };
   const commit = git(["rev-parse", "--short", "HEAD"]);
-  if (commit === null) return { stand: "ohne Commit", commit: null, commits: null, basis: null };
+  if (commit === null) return { stand: "ohne Commit", commit: null, sauber: null, commits: null, basis: null };
   const sauber = !git(["status", "--porcelain"]);
   const ziel = process.env.GITHUB_BASE_REF || "main";
   const basis = [`origin/${ziel}`, ziel].find((ref) => git(["rev-parse", "--verify", "--quiet", ref]) !== null) ?? null;
@@ -82,20 +83,34 @@ function gitInfo() {
   return {
     stand: `${commit} (${sauber ? "sauber" : "mit lokalen Änderungen"})`,
     commit,
+    sauber,
     commits: log === null ? null : log.split("\n").filter(Boolean),
     basis,
   };
 }
 
-/** Angaben aus der Pipeline (GitHub Actions); lokal leer. */
-function ciInfo() {
-  const env = process.env;
+/** Angaben aus der Pipeline (GitHub Actions); lokal leer. `env` nur für die Selbsttests. */
+function ciInfo(env = process.env) {
   const ci = env.GITHUB_ACTIONS === "true" || env.CI === "true";
   const server = env.GITHUB_SERVER_URL || "https://github.com";
   const repo = env.GITHUB_REPOSITORY;
   const lauf = repo && env.GITHUB_RUN_ID ? `${server}/${repo}/actions/runs/${env.GITHUB_RUN_ID}` : null;
   const pr = /^refs\/pull\/(\d+)\//.exec(env.GITHUB_REF ?? "");
-  return { ci, lauf, pullRequest: env.PR_URL || (repo && pr ? `${server}/${repo}/pull/${pr[1]}` : null) };
+  return {
+    ci,
+    repo: repo ?? null,
+    lauf,
+    pullRequest: env.PR_URL || (repo && pr ? `${server}/${repo}/pull/${pr[1]}` : null),
+    ereignis: env.GITHUB_EVENT_NAME ?? null,
+    zweig: env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME || null,
+  };
+}
+
+/** owner/name: in der Pipeline aus GITHUB_REPOSITORY, lokal aus dem Remote origin, sonst der Ordnername. */
+function repoName(ci) {
+  if (ci.repo) return ci.repo;
+  const treffer = /[:/]([^/:]+\/[^/]+?)(?:\.git)?\/?$/.exec(git(["remote", "get-url", "origin"]) ?? "");
+  return treffer ? treffer[1] : path.basename(ROOT);
 }
 
 function laufZeile(bericht) {
@@ -158,19 +173,45 @@ function bewerte(beleg, ctx) {
   return { ok: false, hinweis: "prüft der Reviewer (nicht vollständig automatisch geprüft)" };
 }
 
-/** Block „Vorlage B: Prüfnachweis“: gleiche Zeilen wie in Confluence, belegbare Felder ausgefüllt. */
+/** Zeile „Stand“: Repo, Commit, Pull Request; in der Pipeline auch Link zum Lauf. */
+function standZeile(ctx) {
+  const { git: g, ci } = ctx;
+  const commit = `${g.commit ?? "unbekannt"}${g.sauber === false ? " mit lokalen Änderungen" : ""}`;
+  let pr = OFFEN;
+  if (ci.pullRequest) pr = ci.pullRequest;
+  else if (ci.ci) pr = `kein PR, weil Lauf nach ${ci.ereignis ?? "unbekanntem Ereignis"} auf ${ci.zweig ?? "unbekanntem Zweig"}`;
+  return `Stand: ${ctx.repo}, Commit ${commit}, Pull Request ${pr}${ci.lauf ? `, Lauf ${ci.lauf}` : ""}`;
+}
+
+/** Zeile wie ein AK: Urteil, Beleg, Art des Belegs. `ok` null: der Lauf hat den Punkt nicht geprüft. */
+function belegZeile(name, ok, befehle, ctx) {
+  const { ci } = ctx;
+  if (ok === null) return `${name}: ${OFFEN} – Beleg: nur mit make check – ${OFFEN} (selbst ausgeführt / Pipeline / nur gelesen)`;
+  return `${name}: ${ok ? "erfüllt" : "nicht erfüllt"} – Beleg: ${befehle.join(", ")}${ci.lauf ? `, Lauf ${ci.lauf}` : ""} – ${ci.ci ? "Pipeline" : "selbst ausgeführt"}`;
+}
+
+/**
+ * Block „Vorlage B: Prüfnachweis“ (Entwurf 0.2): Zeilen und Reihenfolge wie in Confluence,
+ * dazu Lint und Tests wie ein Akzeptanzkriterium. Urteil, Reviewer und AK setzt der Reviewer.
+ */
 function vorlageB(ctx) {
-  const nachweis = [ctx.ci.lauf, `Prüfbericht ${ctx.datei}`].filter(Boolean).join(" · ");
+  const neben = ctx.nebenlaeufe;
+  const lint = neben.lint ? neben.lint.ok : null;
+  const tests = neben.test ? neben.test.ok && ctx.berichte.every((b) => b.fehler === 0) : null;
+  const testBefehle = ["make test", ...LAEUFE.map(([, b]) => b)];
+  const ak = `${OFFEN} – Beleg: [Test, Befehl oder Link] – ${OFFEN} (selbst ausgeführt / Pipeline / nur gelesen)`;
   return [
-    "Prüfnachweis (vom Reviewer ausfüllen, alle [OFFEN] ersetzen)",
-    `Geprüft von: ${OFFEN}`,
-    `Datum: ${datum(ctx.zeit)}`,
-    `Version/Commit: ${ctx.git.stand}`,
-    `Pull Request: ${ctx.ci.pullRequest ?? OFFEN}`,
-    `Prüfweg: automatisch (${ctx.befehle[0]}${ctx.befehle.length > 1 ? `: ${ctx.befehle.slice(1).join(", ")}` : ""})`,
-    `Ergebnis je Akzeptanzkriterium: ${OFFEN} (AK1 erfüllt / nicht erfüllt / nicht prüfbar, AK2 …)`,
-    `Nachweis (Link Pipeline / Protokoll / Screenshot): ${nachweis} · Gesamtergebnis ${ctx.ergebnis}`,
-    `Auf eigenem Rechner ausgeführt: ${ctx.ci.ci ? "nein (Pipeline)" : "ja"}`,
+    "Prüfnachweis",
+    `Urteil: ${OFFEN} (abgenommen / zurück an Umsetzung / nicht prüfbar)`,
+    `Geprüft von, Datum: ${OFFEN}`,
+    standZeile(ctx),
+    `AK1: ${ak}`,
+    `AK2: ${ak}`,
+    belegZeile("Lint", lint, ["make lint"], ctx),
+    belegZeile("Tests", tests, testBefehle, ctx),
+    `Muss: ${OFFEN} (Befund mit Fundstelle oder „keine“)`,
+    `Sollte: ${OFFEN} (Befund oder „keine“)`,
+    `Nicht geprüft: ${OFFEN} (was und warum, oder „nichts“)`,
     `Code-Review-Checkliste durchgegangen: ${OFFEN} (ja / nein)`,
   ];
 }
@@ -190,6 +231,7 @@ function checkliste(ctx) {
 function render(ctx) {
   ctx.git ??= gitInfo();
   ctx.ci ??= ciInfo();
+  ctx.repo ??= repoName(ctx.ci);
   const neben = Object.values(ctx.nebenlaeufe);
   const ok = ctx.berichte.every((b) => b.fehler === 0) && neben.every((l) => l.ok);
   ctx.ergebnis = ok ? "BESTANDEN" : "NICHT BESTANDEN";
@@ -201,15 +243,16 @@ function render(ctx) {
   md.push("| Feld | Inhalt |", "| --- | --- |");
   md.push(`| Erzeugt mit | \`${ctx.befehle[0]}\` |`);
   md.push(`| Zeitpunkt | ${uhrzeit(ctx.zeit)} |`);
-  md.push(`| Repository | ${path.basename(ROOT)} · Stand ${ctx.git.stand} |`);
+  md.push(`| Repository | ${ctx.repo} · Stand ${ctx.git.stand} |`);
   md.push(`| Ausgeführt | ${ctx.ci.ci ? `Pipeline${ctx.ci.lauf ? ` (${ctx.ci.lauf})` : ""}` : "auf eigenem Rechner"} |`);
   md.push(`| Gesamtergebnis | **${ctx.ergebnis}** |`);
   md.push(`| Vorlage | [Vorlage: User Story, Akzeptanzkriterien und Prüfnachweis](${VORLAGE}) – Vorlage B und Checkliste Code-Review |`);
   md.push("");
 
   md.push("## 1. Prüfnachweis (Vorlage B)", "");
-  md.push("Sobald das Ticket auf **In Review** geht: diesen Block als Kommentar ins Jira-Ticket kopieren und den Reviewer zuweisen. " +
-    "Der Reviewer **bearbeitet diesen Kommentar** und ersetzt alle [OFFEN].", "");
+  md.push("Der Reviewer legt den Prüfnachweis an: Er kopiert diesen Block als Kommentar ins Jira-Ticket, prüft jeden Beleg selbst " +
+    "und ersetzt alle [OFFEN]. Den Block nur aus einem Pipeline-Lauf oder aus dem eigenen `make check` nehmen, " +
+    "nicht aus dem Lauf der umsetzenden Person: Ihre Aussagen sind kein Beleg.", "");
   md.push("```text", ...block, "```", "");
 
   md.push("## 2. Checkliste Code-Review", "");
@@ -252,17 +295,17 @@ function render(ctx) {
 }
 
 /** Schreibt Bericht mit Zeitstempel und als „-aktuell“; gibt den Pfad der Datei mit Zeitstempel zurück. */
-function schreibe(slug, zeit, inhalt, endung = "md") {
-  fs.mkdirSync(REPORT_DIR, { recursive: true });
-  const file = path.join(REPORT_DIR, `${slug}-${stempel(zeit)}.${endung}`);
+function schreibe(slug, zeit, inhalt, endung = "md", verzeichnis = REPORT_DIR) {
+  fs.mkdirSync(verzeichnis, { recursive: true });
+  const file = path.join(verzeichnis, `${slug}-${stempel(zeit)}.${endung}`);
   fs.writeFileSync(file, inhalt, "utf-8");
-  fs.writeFileSync(path.join(REPORT_DIR, `${slug}-aktuell.${endung}`), inhalt, "utf-8");
+  fs.writeFileSync(path.join(verzeichnis, `${slug}-aktuell.${endung}`), inhalt, "utf-8");
   return file;
 }
 
 /** Datei des Berichts zuerst festlegen, damit der Nachweis auf sie verweisen kann. */
-function dateiFuer(slug, zeit) {
-  return rel(path.join(REPORT_DIR, `${slug}-${stempel(zeit)}.md`));
+function dateiFuer(slug, zeit, verzeichnis = REPORT_DIR) {
+  return rel(path.join(verzeichnis, `${slug}-${stempel(zeit)}.md`));
 }
 
 function laufe(befehl) {
@@ -272,14 +315,17 @@ function laufe(befehl) {
   return { ok: result.status === 0, ausgabe };
 }
 
-/** make check: beide Selbsttests zusammenführen, make lint und make test ausführen, gemeinsamen Nachweis schreiben. */
-function gesamt() {
+/**
+ * make check: beide Selbsttests zusammenführen, make lint und make test ausführen, gemeinsamen Nachweis schreiben.
+ * `verzeichnis` und `fuehreAus` ersetzen die Selbsttests des Prüfnachweises (temporärer Ordner, falsche Läufe).
+ */
+function gesamt(verzeichnis = REPORT_DIR, fuehreAus = laufe) {
   const zeit = new Date();
   const git = gitInfo();
   const berichte = [];
   const fehlend = [];
   for (const [art, befehl] of LAEUFE) {
-    const file = path.join(REPORT_DIR, `pruefbericht-${art}-aktuell.json`);
+    const file = path.join(verzeichnis, `pruefbericht-${art}-aktuell.json`);
     if (!fs.existsSync(file)) {
       fehlend.push(befehl);
       continue;
@@ -292,11 +338,11 @@ function gesamt() {
     console.error(` Prüfnachweis nicht erstellt. Zuerst ausführen: ${fehlend.join(", ")}`);
     return 1;
   }
-  const nebenlaeufe = Object.fromEntries(NEBENLAEUFE.map(([art, befehl]) => [art, laufe(befehl)]));
-  const datei = dateiFuer("pruefnachweis", zeit);
+  const nebenlaeufe = Object.fromEntries(NEBENLAEUFE.map(([art, befehl]) => [art, fuehreAus(befehl)]));
+  const datei = dateiFuer("pruefnachweis", zeit, verzeichnis);
   const befehle = ["make check", ...LAEUFE.map(([, b]) => b), ...NEBENLAEUFE.map(([, b]) => b)];
   const { markdown, konsole, ok } = render({ titel: "Gesamt", befehle, berichte, nebenlaeufe, zeit, datei, git });
-  const file = schreibe("pruefnachweis", zeit, markdown);
+  const file = schreibe("pruefnachweis", zeit, markdown, "md", verzeichnis);
   for (const zeile of konsole) console.log(zeile);
   console.log("");
   console.log(` Gesamtergebnis: ${ok ? "BESTANDEN" : "NICHT BESTANDEN"}`);
@@ -305,6 +351,49 @@ function gesamt() {
   return ok ? 0 : 1;
 }
 
-module.exports = { dateiFuer, gitInfo, render, schreibe };
+// Festes Beispiel für docs/pruefnachweis-beispiel.md: Lint grün, Tests rot (AK4). Gleich in beiden Golden Mastern.
+const BEISPIEL_REPO = "alexandru-tatar/awp-hka-gold-js";
 
-if (require.main === module) process.exitCode = gesamt();
+function beispiel() {
+  const stand = "1a2b3c4 (sauber)";
+  const bericht = (art, titel) => ({
+    art,
+    titel,
+    stand,
+    ergebnis: "BESTANDEN",
+    pruefungen: 10,
+    einzelfaelle: 20,
+    fehler: 0,
+    uebersprungen: 0,
+    regeln: Object.fromEntries(["R-SEC-1", "R-SEC-2", "R-PORT-1", "R-PORT-2", "R-PORT-4"].map((r) => [r, "passed"])),
+    bericht: [` Beispiel: ${titel}`],
+  });
+  return {
+    titel: "Gesamt",
+    befehle: ["make check", ...LAEUFE.map(([, b]) => b), ...NEBENLAEUFE.map(([, b]) => b)],
+    berichte: [bericht("skills", "Prüfbericht Skills"), bericht("starter", "Prüfbericht Starter")],
+    nebenlaeufe: {
+      lint: { ok: true, ausgabe: [] },
+      test: { ok: false, ausgabe: ["FAILED tests/test_app.py::test_beispiel - assert 1 == 2"] },
+    },
+    zeit: new Date(2026, 10, 18, 12, 0, 0),
+    datei: "build/pruefberichte/pruefnachweis-2026-11-18_12-00-00.md",
+    repo: BEISPIEL_REPO,
+    git: { stand, commit: "1a2b3c4", sauber: true, commits: ["HKA-62: Beispiel"], basis: "origin/main" },
+    ci: {
+      ci: true,
+      repo: BEISPIEL_REPO,
+      lauf: `https://github.com/${BEISPIEL_REPO}/actions/runs/123456789`,
+      pullRequest: `https://github.com/${BEISPIEL_REPO}/pull/12`,
+      ereignis: "pull_request",
+      zweig: "HKA62",
+    },
+  };
+}
+
+module.exports = { beispiel, ciInfo, dateiFuer, gesamt, gitInfo, render, schreibe };
+
+if (require.main === module) {
+  if (process.argv.includes("--beispiel")) process.stdout.write(render(beispiel()).markdown); // erzeugt docs/pruefnachweis-beispiel.md
+  else process.exitCode = gesamt();
+}
