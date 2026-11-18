@@ -5,7 +5,7 @@
  *
  * Prüft, dass der Starter die Vorgaben der Plattform erfüllt: Aufbau, Manifest, Abhängigkeiten,
  * ESLint-Verbote, Container, Gerüst der App, Anmeldung auf jeder Route und unveränderte
- * Portal-Bibliothek. Die Tests bleiben grün, wenn eine Person ihre App im Starter baut,
+ * Portal-Bibliothek und Prüfnachweis. Die Tests bleiben grün, wenn eine Person ihre App im Starter baut,
  * solange sie sich an die Regeln hält.
  *
  * Aufruf: make check-starter                  (ohne Container)
@@ -20,10 +20,12 @@ delete process.env.PORTAL_BASE_PATH;
 const assert = require("node:assert/strict");
 const cp = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const {
   ROOT, PY_ROOT, bannedModules, eslintConfig, isBanned, makeTargets, manifestErrors, pruefung, readJson, readText, walk,
 } = require("../common");
+const nachweis = require("../pruefnachweis");
 
 process.chdir(ROOT); // Portal.fromEnv() liest manifest.json aus dem aktuellen Ordner
 
@@ -315,6 +317,91 @@ pruefung("Container im Betrieb", "Container: schreibgeschützt, UID 10001, gesun
   }
 }, { skip: dockerSkip });
 
+// ── Prüfnachweis (HKA-62, Vorlage B 0.2) ─────────────────────────────────────
+
+// Reihenfolge wie auf der Confluence-Seite „Vorlage: User Story, Akzeptanzkriterien und Prüfnachweis“
+const VORLAGE_B_ZEILEN = [
+  "Prüfnachweis", "Urteil:", "Geprüft von, Datum:", "Stand:", "AK1:", "AK2:", "Lint:", "Tests:",
+  "Muss:", "Sollte:", "Nicht geprüft:", "Code-Review-Checkliste durchgegangen:",
+];
+const BEISPIEL_DATEI = path.join(ROOT, "docs", "pruefnachweis-beispiel.md");
+const vorlageBBlock = (markdown) => /```text\n([\s\S]*?)\n```/.exec(markdown)[1].split("\n");
+
+function nachweisBlock(env, { lintOk = true, testOk = true } = {}) {
+  const ctx = nachweis.beispiel();
+  ctx.ci = nachweis.ciInfo(env);
+  delete ctx.repo;
+  ctx.nebenlaeufe = { lint: { ok: lintOk, ausgabe: [] }, test: { ok: testOk, ausgabe: [] } };
+  return vorlageBBlock(nachweis.render(ctx).markdown);
+}
+
+pruefung("Prüfnachweis", "Vorlage B: alle Felder in der Reihenfolge der Confluence-Seite, Urteil [OFFEN]", [], () => {
+  const block = nachweisBlock({});
+  assert.deepEqual(block.map((z) => (z === "Prüfnachweis" ? z : z.slice(0, z.indexOf(":") + 1))), VORLAGE_B_ZEILEN);
+  assert.ok(block[1].startsWith("Urteil: [OFFEN]"));
+  assert.ok(block[3].startsWith("Stand: ") && block[3].includes(", Commit "));
+});
+
+pruefung("Prüfnachweis", "Lokaler Lauf: Stand mit Repo und Commit, Lint und Tests selbst ausgeführt", [], () => {
+  const block = nachweisBlock({});
+  assert.match(block[3], /^Stand: [^,]+, Commit 1a2b3c4, Pull Request \[OFFEN\]$/);
+  assert.equal(block[6], "Lint: erfüllt – Beleg: make lint – selbst ausgeführt");
+  assert.ok(block[7].startsWith("Tests: erfüllt – Beleg: make test, make check-skills, make check-starter"));
+  assert.ok(block[7].endsWith("– selbst ausgeführt"));
+});
+
+pruefung("Prüfnachweis", "Pipeline-Lauf zu einem Pull Request: Link zu Lauf und Pull Request, Beleg „Pipeline“", [], () => {
+  const env = {
+    GITHUB_ACTIONS: "true",
+    GITHUB_REPOSITORY: "alexandru-tatar/awp-hka-gold-js",
+    GITHUB_RUN_ID: "42",
+    GITHUB_REF: "refs/pull/12/merge",
+    GITHUB_EVENT_NAME: "pull_request",
+  };
+  const block = nachweisBlock(env);
+  const lauf = "https://github.com/alexandru-tatar/awp-hka-gold-js/actions/runs/42";
+  const pr = "https://github.com/alexandru-tatar/awp-hka-gold-js/pull/12";
+  assert.equal(block[3], `Stand: alexandru-tatar/awp-hka-gold-js, Commit 1a2b3c4, Pull Request ${pr}, Lauf ${lauf}`);
+  assert.equal(block[6], `Lint: erfüllt – Beleg: make lint, Lauf ${lauf} – Pipeline`);
+  assert.ok(block[7].endsWith(`, Lauf ${lauf} – Pipeline`));
+  const push = nachweisBlock({ ...env, GITHUB_REF: "refs/heads/develop", GITHUB_EVENT_NAME: "push", GITHUB_REF_NAME: "develop" });
+  assert.ok(push[3].includes("Pull Request kein PR, weil Lauf nach push auf develop, Lauf "));
+});
+
+pruefung("Prüfnachweis", "Rotes make lint oder make test: „nicht erfüllt“, Nachweis wird trotzdem geschrieben", [], (rot) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pruefnachweis-"));
+  const log = console.log;
+  try {
+    const { stand } = nachweis.gitInfo();
+    for (const bericht of nachweis.beispiel().berichte) {
+      fs.writeFileSync(path.join(dir, `pruefbericht-${bericht.art}-aktuell.json`), JSON.stringify({ ...bericht, stand }));
+    }
+    const laeufe = { "make lint": { ok: rot !== "lint", ausgabe: ["x"] }, "make test": { ok: rot !== "test", ausgabe: ["x"] } };
+    console.log = () => {};
+    const status = nachweis.gesamt(dir, (befehl) => laeufe[befehl]);
+    console.log = log;
+    const datei = path.join(dir, "pruefnachweis-aktuell.md");
+    assert.equal(status, 1);
+    assert.ok(fs.existsSync(datei), "Nachweis wurde nicht geschrieben");
+    const block = vorlageBBlock(fs.readFileSync(datei, "utf-8"));
+    const rotZeile = block.find((z) => z.startsWith(rot === "lint" ? "Lint:" : "Tests:"));
+    const andere = block.find((z) => z.startsWith(rot === "lint" ? "Tests:" : "Lint:"));
+    assert.ok(rotZeile.includes(": nicht erfüllt –"), rotZeile);
+    assert.ok(andere.includes(": erfüllt –"), andere);
+  } finally {
+    console.log = log;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}, { cases: ["lint", "test"] });
+
+pruefung("Prüfnachweis", "docs/pruefnachweis-beispiel.md ist der aktuelle Stand der Ausgabe", [], () => {
+  assert.equal(
+    fs.readFileSync(BEISPIEL_DATEI, "utf-8"),
+    nachweis.render(nachweis.beispiel()).markdown,
+    "neu erzeugen: node tools/tests/pruefnachweis.js --beispiel",
+  );
+});
+
 // ── Gleichlauf mit dem Python-Golden-Master (HKA-44, Kriterium 9) ────────────
 
 const skipPy = fs.existsSync(PY_ROOT) ? false : "awp-hka-gold-python liegt nicht neben diesem Repository";
@@ -352,4 +439,9 @@ pruefung("Gleichlauf mit Python", "Gleiche Prüfbereiche im Prüfbericht", [], (
     ours.delete("Gleichlauf mit <Sprache>");
     assert.deepEqual([...ours].sort(), [...theirs].sort(), js);
   }
+}, { skip: skipPy });
+
+pruefung("Gleichlauf mit Python", "Gleiches Beispiel für den Prüfnachweis (nur Sprache, Repo und Commit weichen ab)", [], () => {
+  const normal = (text) => text.replace(/JavaScript|Python/g, "<Sprache>").replace(/awp-hka-gold-(js|python)/g, "awp-hka-gold-<x>");
+  assert.equal(normal(fs.readFileSync(BEISPIEL_DATEI, "utf-8")), normal(pyText("docs/pruefnachweis-beispiel.md")));
 }, { skip: skipPy });
