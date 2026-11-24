@@ -31,7 +31,7 @@ const MAKE_PLANNED = new Set(["template-update"]); // Architekturvorschlag 07 §
 
 // Dateien, auf die die Skills verweisen, die es im Starter noch nicht gibt (Phase 2)
 const PATHS_PLANNED = new Set([
-  "AGENTS.md", "AGENTS.local.md", ".devcontainer/",
+  "AGENTS.local.md", ".devcontainer/", // AGENTS.local.md: optional, legt das App-Team an (docs/ki-werkzeuge.md)
   "docs/schnittstellen/noten.md", "docs/schnittstellen/mail.md", "docs/schnittstellen/eakte.md",
   "docs/fehlercodes.md", "tools/a11y-structural.mjs", "build/a11y/",
 ]);
