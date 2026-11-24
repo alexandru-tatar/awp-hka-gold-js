@@ -4,8 +4,10 @@
  * Prüfnachweis nach der Confluence-Vorlage „Vorlage: User Story, Akzeptanzkriterien und Prüfnachweis“
  * (Vorlage B: Prüfnachweis, Checkliste Code-Review).
  *
- * Der automatische Lauf füllt aus, was er belegen kann (Datum, Commit, Prüfweg, Nachweis, Tests, Lint,
- * Regeln, Commit-Nachrichten). Alles andere bleibt [OFFEN] oder [ ] und prüft der Reviewer.
+ * Der Block „Prüfnachweis“ hat genau die Zeilen von Vorlage B; der Lauf trägt Pull Request und Commit ein.
+ * Den Block legt der Reviewer als Kommentar im Ticket an und füllt die übrigen Zeilen aus.
+ * In der Checkliste belegt der Lauf, was er prüfen kann (Tests, Lint, Regeln, Commit-Nachrichten);
+ * alles andere bleibt [ ] und prüft der Reviewer.
  *
  * Aufruf:
  *   make check-skills / make check-starter  →  report.js schreibt den Bericht eines Selbsttests
@@ -23,7 +25,6 @@ const { ROOT } = require("./common");
 const SPRACHE = "JavaScript";
 const REPORT_DIR = path.join(ROOT, "build", "pruefberichte");
 const VORLAGE = "https://hka-awp.atlassian.net/wiki/spaces/HKA/pages/19922945";
-const OFFEN = "[OFFEN]";
 const TICKET_RE = /^HKA-\d+\b/;
 const LAEUFE = [
   ["skills", "make check-skills", "Selbsttest Skills"],
@@ -158,20 +159,20 @@ function bewerte(beleg, ctx) {
   return { ok: false, hinweis: "prüft der Reviewer (nicht vollständig automatisch geprüft)" };
 }
 
-/** Block „Vorlage B: Prüfnachweis“: gleiche Zeilen wie in Confluence, belegbare Felder ausgefüllt. */
+/**
+ * Block „Vorlage B: Prüfnachweis“ (Version 0.3): genau die Zeilen aus Confluence.
+ * Der Lauf trägt nur Pull Request (aus der Pipeline, lokal leer) und Commit ein.
+ */
 function vorlageB(ctx) {
-  const nachweis = [ctx.ci.lauf, `Prüfbericht ${ctx.datei}`].filter(Boolean).join(" · ");
+  const stand = `(Commit ${ctx.git.commit ?? "unbekannt"})`;
   return [
-    "Prüfnachweis (vom Reviewer ausfüllen, alle [OFFEN] ersetzen)",
-    `Geprüft von: ${OFFEN}`,
-    `Datum: ${datum(ctx.zeit)}`,
-    `Version/Commit: ${ctx.git.stand}`,
-    `Pull Request: ${ctx.ci.pullRequest ?? OFFEN}`,
-    `Prüfweg: automatisch (${ctx.befehle[0]}${ctx.befehle.length > 1 ? `: ${ctx.befehle.slice(1).join(", ")}` : ""})`,
-    `Ergebnis je Akzeptanzkriterium: ${OFFEN} (AK1 erfüllt / nicht erfüllt / nicht prüfbar, AK2 …)`,
-    `Nachweis (Link Pipeline / Protokoll / Screenshot): ${nachweis} · Gesamtergebnis ${ctx.ergebnis}`,
-    `Auf eigenem Rechner ausgeführt: ${ctx.ci.ci ? "nein (Pipeline)" : "ja"}`,
-    `Code-Review-Checkliste durchgegangen: ${OFFEN} (ja / nein)`,
+    "Prüfnachweis",
+    "Ergebnis: abgenommen / zurück an Umsetzung",
+    "Geprüft von, am:",
+    ctx.ci.pullRequest ? `Pull Request: ${ctx.ci.pullRequest} ${stand}` : `Pull Request: ${stand}`,
+    "AK1: ok / nicht ok / nur gelesen – geprüft mit: <Test, Befehl oder Link>",
+    "AK2: ok / nicht ok / nur gelesen – geprüft mit: <Test, Befehl oder Link>",
+    "Befunde: <[Muss] oder [Sollte] mit Datei oder Stelle, sonst „keine“>",
   ];
 }
 
@@ -208,8 +209,8 @@ function render(ctx) {
   md.push("");
 
   md.push("## 1. Prüfnachweis (Vorlage B)", "");
-  md.push("Sobald das Ticket auf **In Review** geht: diesen Block als Kommentar ins Jira-Ticket kopieren und den Reviewer zuweisen. " +
-    "Der Reviewer **bearbeitet diesen Kommentar** und ersetzt alle [OFFEN].", "");
+  md.push("Den Prüfnachweis legt der Reviewer als Kommentar im Jira-Ticket an: Block kopieren, " +
+    "je Akzeptanzkriterium eine Zeile schreiben und die übrigen Zeilen ausfüllen.", "");
   md.push("```text", ...block, "```", "");
 
   md.push("## 2. Checkliste Code-Review", "");
@@ -305,6 +306,6 @@ function gesamt() {
   return ok ? 0 : 1;
 }
 
-module.exports = { dateiFuer, gitInfo, render, schreibe };
+module.exports = { dateiFuer, gitInfo, render, schreibe, vorlageB };
 
 if (require.main === module) process.exitCode = gesamt();
