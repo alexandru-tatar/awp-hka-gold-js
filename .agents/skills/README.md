@@ -62,7 +62,7 @@ Ein Lauf ohne Abweichungen wird als **Goldener Standard** gespeichert. Jede neue
 
 Form und Zusammenhang der Skills prüft `make check-skills` ohne KI: Kopf, Regeln und Prüfungen (40 / 33 / 7), Zählung in dieser Datei, Beispiele, Verweise auf Befehle und Dateien, ESLint-Verbote, Beispielantworten, Satzlänge und den Gleichlauf mit Python. Der Prüfbericht liegt in `build/pruefberichte/`. Ob die KI die Skills befolgt, prüft dieser Test nicht.
 
-**Stand:** Es hat noch kein Testlauf mit der KI stattgefunden. Die Skills bleiben Entwurf, bis die Testaufgabe durchgelaufen ist und die Abweichungen eingearbeitet sind.
+**Stand der Testläufe (23.11.2026):** Die Testaufgabe ist mit beiden Golden Mastern gelaufen, je drei Läufe. Python lief am 04.11.2026 mit `skills-v0.2.0`. JavaScript lief am 22.11.2026 mit dem Stand von `main`. Das Szenario S3 (eingecheckter Schlüssel) lief am 22.11.2026 für beide. Die Prüfprotokolle stehen in Confluence unter „KI-Regeltreue: Prüfprotokolle“. Keine Einzelregel ist verletzt. Offen ist die Bestätigung der H- und M-Regeln durch eine Prüfperson (HKA-88). Für JavaScript sind außerdem R-SCHN-3 und R-UI-5 noch offen (HKA-86). Bis dahin bleiben die Skills Entwurf.
 
 ## Konventionen in den Beispielen
 
