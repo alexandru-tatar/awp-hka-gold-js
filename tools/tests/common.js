@@ -28,23 +28,25 @@ const ICONS = new Set(["grades", "mail", "calendar", "document", "people", "book
 const ROLE_RE = /^[a-z][a-z0-9-]*$/;
 const ADAPTER_RE = /^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/;
 const VERSION_RE = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
-const MANIFEST_FIELDS = new Set(["slug", "name", "category", "menu", "roles", "adapters", "claims", "version"]);
+const MANIFEST_FIELDS = new Set(["slug", "name", "name_en", "category", "menu", "roles", "adapters", "claims", "version"]);
 
 /** Abweichungen vom Manifest-Schema als Liste (leer = gültig). */
 function manifestErrors(m) {
   const errors = [];
   const unknown = Object.keys(m).filter((k) => !MANIFEST_FIELDS.has(k));
   if (unknown.length) errors.push(`unbekannte Felder: ${unknown.sort()}`);
-  for (const key of ["slug", "name", "category", "menu", "roles", "version"]) {
+  for (const key of ["slug", "name", "name_en", "category", "menu", "roles", "version"]) {
     if (!(key in m)) errors.push(`Pflichtfeld fehlt: ${key}`);
   }
   if ("slug" in m && !SLUG_RE.test(String(m.slug))) errors.push("slug ungültig");
   if ("name" in m && !(typeof m.name === "string" && m.name.length >= 1 && m.name.length <= 60)) errors.push("name ungültig");
+  if ("name_en" in m && !(typeof m.name_en === "string" && m.name_en.length >= 1 && m.name_en.length <= 60)) errors.push("name_en ungültig");
   if ("category" in m && !CATEGORIES.has(m.category)) errors.push("category ungültig");
   if ("menu" in m) {
     const menu = m.menu ?? {};
-    if (Object.keys(menu).sort().join() !== "icon,label") errors.push("menu braucht genau label und icon");
+    if (Object.keys(menu).sort().join() !== "icon,label,label_en") errors.push("menu braucht genau label, label_en und icon");
     if (!(typeof menu.label === "string" && menu.label.length >= 1 && menu.label.length <= 40)) errors.push("menu.label ungültig");
+    if (!(typeof menu.label_en === "string" && menu.label_en.length >= 1 && menu.label_en.length <= 40)) errors.push("menu.label_en ungültig");
     if (!ICONS.has(menu.icon)) errors.push("menu.icon ungültig");
   }
   if ("roles" in m) {

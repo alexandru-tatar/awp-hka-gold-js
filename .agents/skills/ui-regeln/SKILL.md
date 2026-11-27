@@ -12,12 +12,12 @@ Alle Apps im Portal fühlen sich gleich an. Menü, Dialoge, Knöpfe und Texte fo
 | ID | Regel | Stufe |
 |---|---|---|
 | R-UI-1 | Das Menü steht links und kommt vom Portal (`layout()`); die App baut kein eigenes. | muss |
-| R-UI-2 | Ein Dialog hat genau zwei Knöpfe: „Abbrechen" und die Aktion. | muss |
+| R-UI-2 | Ein Dialog hat genau zwei Knöpfe: „Abbrechen" (englisch „Cancel") und die Aktion. | muss |
 | R-UI-3 | Knöpfe nennen die Aktion als Verb („Senden", „Speichern"), nicht „OK" oder „Ja". | muss |
-| R-UI-4 | Pflichtfelder sind mit dem Text „Pflichtfeld" gekennzeichnet, nicht nur durch Farbe oder Stern. | soll |
+| R-UI-4 | Pflichtfelder sind mit dem Text „Pflichtfeld" (englisch „required") gekennzeichnet, nicht nur durch Farbe oder Stern. | soll |
 | R-UI-5 | Fehlermeldungen sagen, was falsch ist und wie man es behebt. | soll |
 | R-UI-6 | Vor nicht rückgängig zu machenden Aktionen fragt ein Dialog nach. | muss |
-| R-UI-7 | Alle Texte für Nutzerinnen und Nutzer sind Deutsch, in einfacher Sprache und in der Sie-Form. | soll |
+| R-UI-7 | Alle Texte für Nutzerinnen und Nutzer gibt es auf Deutsch und auf Englisch, in einfacher Sprache. Die Seite folgt der Sprache der Person (`portal.language`). Deutsch ist die Standardsprache und steht in der Sie-Form. | soll |
 
 ## So geht es im JavaScript-Starter
 
@@ -26,7 +26,20 @@ Alle Apps im Portal fühlen sich gleich an. Menü, Dialoge, Knöpfe und Texte fo
 3. **Dialog:** Er fragt vor einer Aktion, die sich nicht zurücknehmen lässt (zum Beispiel eine Nachricht senden). Er hat genau zwei Knöpfe: „Abbrechen“ links, die Aktion rechts. Der Titel ist eine Frage. Der Text nennt die Folge. Der Knopf, der den Dialog öffnet, endet mit „…“. Ein Dialog nur zur Information ist nicht erlaubt.
 4. **Pflichtfelder:** Das Label trägt den Text „(Pflichtfeld)“ in `<span class="field__required">`. Ein Stern oder eine Farbe allein reicht nicht.
 5. **Fehlermeldungen:** Sie sagen, was falsch ist und wie man es behebt. Bei mehreren Fehlern steht oben im Formular eine Zusammenfassung mit Links auf die Felder (`error-summary`).
-6. **Sprache:** Alle Texte sind Deutsch, in einfacher Sprache und in der Sie-Form. Das Portal setzt `lang="de"`. Verwenden Sie keine englischen Standardwörter wie „Submit“, „Cancel“ oder „Loading…“.
+6. **Sprache:** Alle Texte gibt es auf Deutsch und auf Englisch, in einfacher Sprache. `portal.language(req)` liefert die Sprache der Person (`de` oder `en`). Deutsch ist die Standardsprache und steht in der Sie-Form. Legen Sie die Texte je Sprache in einem Wörterbuch ab, nie fest in der Vorlage. Beide Sprachen haben dieselben Schlüssel. Das Portal setzt `lang`. Verwenden Sie in deutschen Texten keine englischen Standardwörter wie „Submit“, „Cancel“ oder „Loading…“.
+
+Texte in beiden Sprachen:
+
+```js
+const TEXTS = {
+  de: { title: "Nachricht schreiben", subjectMissing: "Bitte geben Sie einen Betreff ein." },
+  en: { title: "Write a message", subjectMissing: "Please enter a subject." },
+};
+
+const tx = TEXTS[portal.language(req)];
+```
+
+Die Beispiele zeigen den deutschen Text. In der App kommt jeder Text aus dem Wörterbuch der Sprache der Person.
 
 Dialog mit genau zwei Knöpfen:
 
@@ -67,6 +80,7 @@ Fehlerzusammenfassung:
 | „Fehler 422“ | „Bitte geben Sie einen Betreff ein.“ |
 | Die Mail wird beim Klick auf „Senden“ sofort verschickt | Der Dialog „Nachricht senden?“ fragt vorher nach |
 | Knopf „Submit“, Meldung „Loading…“ | Knopf „Senden“, Meldung „Die Daten werden geladen.“ |
+| Ein Text steht nur auf Deutsch in der Vorlage | Jeder Text steht im Wörterbuch auf Deutsch und auf Englisch |
 
 ## Prüfungen, die das absichern
 
@@ -80,7 +94,7 @@ A = automatisch, H = halbautomatisch (eine Person bestätigt), M = manuell (eine
 | R-UI-4 | A (`test`) |
 | R-UI-5 | M (`prf`) |
 | R-UI-6 | M (`prf`) |
-| R-UI-7 | M (`prf`; automatisch: `lang="de"`, keine englischen Standardwörter wie „Submit") |
+| R-UI-7 | M (`prf`; automatisch: `lang` ist `de` oder `en`, beide Sprachen haben dieselben Textschlüssel, in deutschen Texten keine englischen Standardwörter wie „Submit") |
 
 ## Vor dem Abschluss
 
@@ -90,5 +104,5 @@ A = automatisch, H = halbautomatisch (eine Person bestätigt), M = manuell (eine
 - [ ] Pflichtfelder tragen den Text „(Pflichtfeld)“
 - [ ] Jede Fehlermeldung sagt, was zu tun ist
 - [ ] Vor jeder nicht umkehrbaren Aktion fragt ein Dialog nach
-- [ ] Alle Texte sind Deutsch, einfach und in der Sie-Form
+- [ ] Alle Texte gibt es auf Deutsch und auf Englisch, einfach; Deutsch in der Sie-Form
 - [ ] `make lint` und `make test` laufen ohne Fehler

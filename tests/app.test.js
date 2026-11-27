@@ -46,3 +46,17 @@ test("Startseite im Portal-Rahmen", async () => {
   expect(html.match(/<h1/g)).toHaveLength(1);
   expect(res.headers.get("set-cookie")).toBeNull();
 });
+
+test("Startseite auf Englisch, wenn die Person Englisch gewählt hat", async () => {
+  const res = await fetch(`${app.base}/`, { headers: { ...asStudent(), "Accept-Language": "en-GB,en;q=0.9" } });
+  expect(res.status).toBe(200);
+  const html = await res.text();
+  expect(html).toContain('<html lang="en">');
+  expect(html).toContain("<h1>My app</h1>");
+});
+
+test("alle Texte gibt es auf Deutsch und Englisch", () => {
+  const { TEXTS } = require("../src/routes");
+  expect(Object.keys(TEXTS).sort()).toEqual(["de", "en"]);
+  expect(Object.keys(TEXTS.de).sort()).toEqual(Object.keys(TEXTS.en).sort());
+});
