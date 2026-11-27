@@ -40,7 +40,7 @@ const nodeMajor = () => readText(".nvmrc").trim();
 
 const MANAGED = [
   "Makefile", "Dockerfile", ".dockerignore", ".gitignore", ".gitattributes", ".nvmrc", "package.json", "package-lock.json",
-  "eslint.config.js", "manifest.json", "README.md", ".agents/skills/README.md", "platform_sdk/VERSION", "platform_sdk/SHA256",
+  "eslint.config.js", "manifest.json", "README.md", ".agents/skills/README.md", "AGENTS.md", "CLAUDE.md", "platform_sdk/VERSION", "platform_sdk/SHA256",
   "platform_sdk/index.js", "src/app.js", "src/routes.js", "src/server.js", "src/static/app.css", "src/views/page.njk",
   "tests/helpers.js", "tests/app.test.js",
 ];
@@ -48,6 +48,21 @@ const MANAGED = [
 pruefung("Aufbau", "Pflichtdateien vorhanden", [], (file) => {
   assert.ok(fs.statSync(path.join(ROOT, file), { throwIfNoEntry: false })?.isFile(), `${file} fehlt`);
 }, { cases: MANAGED });
+
+// Verweisdateien für einzelne KI-Werkzeuge (docs/ki-werkzeuge.md): enthalten nur den Verweis auf AGENTS.md
+const POINTERS = ["CLAUDE.md"];
+
+pruefung("Aufbau", "AGENTS.md führt zu den Skills und zu make check", [], () => {
+  const text = readText("AGENTS.md");
+  for (const needle of [".agents/skills/README.md", ".agents/skills/*/SKILL.md", "AGENTS.local.md", "DATA_DIR", "make check"]) {
+    assert.ok(text.includes(needle), `AGENTS.md nennt ${needle} nicht`);
+  }
+});
+
+pruefung("Aufbau", "Verweisdateien für KI-Werkzeuge enthalten nur den Verweis auf AGENTS.md", [], (file) => {
+  const lines = readText(file).replace(/<!--[\s\S]*?-->/g, "").split("\n").map((l) => l.trim()).filter(Boolean);
+  assert.ok(lines.length === 1 && lines[0].includes("AGENTS.md") && lines[0].length <= 200, `${file}: mehr als der Verweis auf AGENTS.md`);
+}, { cases: POINTERS });
 
 pruefung("Aufbau", "Befehle dev, start, test, lint, docker, lock, sdk-update", [], () => {
   const targets = makeTargets();
@@ -329,10 +344,13 @@ pruefung("Gleichlauf mit Python", "Gleiche make-Befehle", [], () => {
 pruefung("Gleichlauf mit Python", "Gleiche Pflichtdateien, gleiches Manifest, gleiche SDK-Version", [], () => {
   const common = [
     "Makefile", "Dockerfile", ".dockerignore", ".gitignore", "manifest.json", "README.md", ".agents/skills/README.md",
-    "platform_sdk/VERSION", "platform_sdk/SHA256", "tools/tests/skills", "tools/tests/starter",
+    "AGENTS.md", "CLAUDE.md", "platform_sdk/VERSION", "platform_sdk/SHA256", "tools/tests/skills", "tools/tests/starter",
   ];
   for (const file of common) {
     assert.ok(fs.existsSync(path.join(ROOT, file)) && fs.existsSync(path.join(PY_ROOT, file)), `${file} fehlt in einem der Repositories`);
+  }
+  for (const file of ["AGENTS.md", ...POINTERS]) { // eine Quelle für die Regeln: in beiden Golden Mastern gleich
+    assert.equal(readText(file), pyText(file), `${file} unterscheidet sich zwischen den Golden Mastern`);
   }
   assert.deepEqual(readJson("manifest.json"), JSON.parse(pyText("manifest.json")));
   assert.equal(readText("platform_sdk/VERSION"), pyText("platform_sdk/VERSION"));
