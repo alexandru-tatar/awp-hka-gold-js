@@ -4,8 +4,8 @@
  * Selbsttests des Golden Master (JavaScript-Starter).
  *
  * Prüft, dass der Starter die Vorgaben der Plattform erfüllt: Aufbau, Manifest, Abhängigkeiten,
- * ESLint-Verbote, Container, Gerüst der App, Anmeldung auf jeder Route und unveränderte
- * Portal-Bibliothek. Die Tests bleiben grün, wenn eine Person ihre App im Starter baut,
+ * ESLint-Verbote, Container, Image-Tag und Deploy, Gerüst der App, Anmeldung auf jeder Route,
+ * unveränderte Portal-Bibliothek und Gleichlauf mit dem Python-Golden-Master. Die Tests bleiben grün, wenn eine Person ihre App im Starter baut,
  * solange sie sich an die Regeln hält.
  *
  * Aufruf: make check-starter                  (ohne Container)
@@ -20,6 +20,7 @@ delete process.env.PORTAL_BASE_PATH;
 const assert = require("node:assert/strict");
 const cp = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const {
   ROOT, PY_ROOT, bannedModules, eslintConfig, isBanned, makeTargets, manifestErrors, pruefung, readJson, readText, walk,
@@ -315,6 +316,230 @@ pruefung("Container im Betrieb", "Container: schreibgeschützt, UID 10001, gesun
   }
 }, { skip: dockerSkip });
 
+// ── Image und Deploy (HKA-65) ────────────────────────────────────────────────
+// tools/build-image.sh und tools/deploy.sh laufen gegen Platzhalter für docker, ssh und scp. Die Platzhalter merken
+// sich vergebene Tags und schreiben jeden Aufruf mit; es wird nichts gebaut und nichts übertragen.
+// Mit CHECK_DOCKER=1 kommt ein echter Build dazu.
+
+const bashUndMake = ["bash", "make"].some((cmd) => cp.spawnSync(cmd, ["--version"]).error) ? "bash und make fehlen" : false;
+const SLUG = readJson("manifest.json").slug;
+const DIGEST = `sha256:${"0".repeat(64)}`;
+const FREMD = new Set(["STUFE", "BAUZEIT", "IMAGE", "ZIEL", "VM", "VM_USER", "OWNER_REPO", "MAKEFLAGS", "MAKELEVEL", "MFLAGS"]);
+const sauberesEnv = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => !FREMD.has(key)));
+
+const PLATZHALTER = {
+  docker: String.raw`#!/usr/bin/env bash
+echo "docker $*" >> "$FAKE_LOG"
+case "$1" in
+  build)
+    while [ $# -gt 0 ]; do
+      if [ "$1" = --iidfile ]; then echo "sha256:platzhalter$(wc -l < "$FAKE_LOG" | tr -d ' ')" > "$2"; fi
+      shift
+    done ;;
+  image) grep -qxF "$3" "$FAKE_TAGS"; exit $? ;;
+  tag) echo "$3" >> "$FAKE_TAGS" ;;
+  save) echo "TAR" ;;
+esac
+`,
+  // Das Skript, das deploy.sh mit "ssh -t … bash -c <skript>" auf der VM ausführt, landet in $FAKE_REMOTE.
+  ssh: String.raw`#!/usr/bin/env bash
+echo "ssh $*" >> "$FAKE_LOG"
+for last; do :; done
+case "$last" in
+  "bash -c "*) eval "set -- $last"; printf '%s\n' "$3" > "$FAKE_REMOTE" ;;
+esac
+`,
+  scp: String.raw`#!/usr/bin/env bash
+echo "scp $*" >> "$FAKE_LOG"
+`,
+};
+
+/** Führt fn mit Platzhaltern für docker, ssh und scp aus; danach wird der Ordner gelöscht. */
+function mitPlatzhaltern(fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gold-js-platzhalter-"));
+  try {
+    const bin = path.join(dir, "bin");
+    fs.mkdirSync(bin);
+    for (const [name, text] of Object.entries(PLATZHALTER)) fs.writeFileSync(path.join(bin, name), text, { mode: 0o755 });
+    const files = { log: path.join(dir, "aufrufe.log"), tags: path.join(dir, "tags"), remote: path.join(dir, "remote.sh") };
+    for (const file of Object.values(files)) fs.writeFileSync(file, "");
+    const env = {
+      ...sauberesEnv(), PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+      FAKE_LOG: files.log, FAKE_TAGS: files.tags, FAKE_REMOTE: files.remote,
+    };
+    return fn({
+      dir,
+      run: (cmd, args, { cwd = ROOT, ...extra } = {}) => cp.spawnSync(cmd, args, { cwd, env: { ...env, ...extra }, encoding: "utf-8", timeout: 60_000 }),
+      aufrufe: (befehl) => fs.readFileSync(files.log, "utf-8").split("\n").filter((z) => z.startsWith(`${befehl} `)),
+      log: () => fs.readFileSync(files.log, "utf-8"),
+      remote: () => fs.readFileSync(files.remote, "utf-8"),
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Wert von --label org.opencontainers.image.<name>=… aus einem docker-build-Aufruf. */
+const label = (aufruf, name) => aufruf.match(new RegExp(String.raw`--label org\.opencontainers\.image\.${name}=(\S+)`))[1];
+
+/** Was tools/build-image.sh als revision einträgt: Commit, mit -dirty bei nicht committeten Änderungen. */
+function gitRevision() {
+  const head = run("git", ["rev-parse", "HEAD"]);
+  if (head.error || head.status !== 0) return "unbekannt";
+  return head.stdout.trim() + (run("git", ["status", "--porcelain"]).stdout.trim() ? "-dirty" : "");
+}
+
+/** Minute in Europe/Berlin als JJJJMMTT-HHMM und der Abstand zu UTC als +01:00 bzw. +02:00. */
+function berlin(date) {
+  const format = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "longOffset",
+  });
+  const t = Object.fromEntries(format.formatToParts(date).map((p) => [p.type, p.value]));
+  return { minute: `${t.year}${t.month}${t.day}-${t.hour}${t.minute}`, offset: t.timeZoneName.replace("GMT", "") };
+}
+
+/** Kopie von Makefile, Werkzeugen und Manifest mit eigenem slug (deploy.sh lehnt meine-app ab). */
+function deployKopie(dir) {
+  const kopie = path.join(dir, "app");
+  fs.mkdirSync(path.join(kopie, "tools"), { recursive: true });
+  for (const file of ["Makefile", "tools/deploy.sh", "tools/build-image.sh"]) fs.copyFileSync(path.join(ROOT, file), path.join(kopie, file));
+  fs.writeFileSync(path.join(kopie, "manifest.json"), JSON.stringify({ ...readJson("manifest.json"), slug: "selbsttest-app" }, null, 2));
+  return kopie;
+}
+
+pruefung("Image und Deploy", "make docker: Tag test-JJJJMMTT-HHMM mit der Bauzeit in Europe/Berlin (HKA-65, AK1)", [], () => mitPlatzhaltern((p) => {
+  const vorher = berlin(new Date()).minute;
+  const result = p.run("make", ["-s", "docker"]);
+  const nachher = berlin(new Date()).minute;
+  assert.equal(result.status, 0, result.stderr);
+  const tag = result.stdout.trim().match(new RegExp(String.raw`^${SLUG}:test-(\d{8}-\d{4})$`));
+  assert.ok(tag, result.stdout);
+  assert.ok(vorher <= tag[1] && tag[1] <= nachher, `${tag[1]} liegt nicht zwischen ${vorher} und ${nachher}`);
+  const created = label(p.aufrufe("docker build")[0], "created");
+  assert.equal(berlin(new Date(created)).minute, tag[1]);
+  assert.equal(created.slice(-6), berlin(new Date(created)).offset);
+}), { skip: bashUndMake });
+
+const STUFEN = {
+  "test-winterzeit": [[], "2026-11-25T14:30:00+01:00", "test-20261125-1430"],
+  "prod-sommerzeit": [["STUFE=prod"], "2026-07-01T09:05:59+02:00", "prod-20260701-0905"],
+  "test-mitternacht": [["STUFE=test"], "2026-01-01T00:00:00+01:00", "test-20260101-0000"],
+};
+
+pruefung("Image und Deploy", "Tag aus der Bauzeit; Produktiv-Build mit make docker STUFE=prod (AK1, AK2)", [], (fall) => mitPlatzhaltern((p) => {
+  const [makeArgs, bauzeit, tag] = STUFEN[fall];
+  const result = p.run("make", ["-s", "docker", ...makeArgs], { BAUZEIT: bauzeit });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), `${SLUG}:${tag}`);
+  assert.equal(label(p.aufrufe("docker build")[0], "created"), bauzeit);
+}), { cases: Object.keys(STUFEN), skip: bashUndMake });
+
+const ABGELEHNT = {
+  "stufe-staging": [[], { STUFE: "staging" }],
+  "name-grossbuchstaben": [["Meine-App"], {}],
+  "name-mit-tag": [["meine-app:latest"], {}],
+  "option-tag": [["meine-app", "--tag", "meine-app:latest"], {}],
+  "option-t": [["-t=meine-app:latest"], {}],
+  "zeit-utc": [[], { BAUZEIT: "2026-11-25T14:30:00+00:00" }],
+  "zeit-unvollstaendig": [[], { BAUZEIT: "2026-11-25T14:30" }],
+};
+
+pruefung("Image und Deploy", "Abgelehnt: falsche Stufe, ungültiger Name, eigenes Tag, Zeit nicht in Europe/Berlin", [], (fall) => mitPlatzhaltern((p) => {
+  const [args, env] = ABGELEHNT[fall];
+  const result = p.run("bash", ["tools/build-image.sh", ...args], env);
+  assert.notEqual(result.status, 0);
+  assert.ok(result.stderr.includes("FEHLER"), result.stderr);
+  assert.deepEqual(p.aufrufe("docker build"), []);
+}), { cases: Object.keys(ABGELEHNT), skip: bashUndMake });
+
+pruefung("Image und Deploy", "Labels: Bauzeit (created) und Git-Commit (revision) (AK3)", [], () => mitPlatzhaltern((p) => {
+  const result = p.run("bash", ["tools/build-image.sh"], { BAUZEIT: "2026-11-25T14:30:00+01:00" });
+  assert.equal(result.status, 0, result.stderr);
+  const aufrufe = p.aufrufe("docker build");
+  assert.equal(aufrufe.length, 1);
+  assert.equal(label(aufrufe[0], "created"), "2026-11-25T14:30:00+01:00");
+  assert.equal(label(aufrufe[0], "revision"), gitRevision());
+}), { skip: bashUndMake });
+
+pruefung("Image und Deploy", "Zweiter Build in derselben Minute: Zähler -2, vorhandenes Tag bleibt (AK4)", [], () => mitPlatzhaltern((p) => {
+  const refs = [];
+  for (const sekunde of ["00", "20", "40"]) {
+    const result = p.run("bash", ["tools/build-image.sh"], { BAUZEIT: `2026-11-25T14:30:${sekunde}+01:00` });
+    assert.equal(result.status, 0, result.stderr);
+    refs.push(result.stdout.trim());
+  }
+  const basis = `${SLUG}:test-20261125-1430`;
+  assert.deepEqual(refs, [basis, `${basis}-2`, `${basis}-3`]);
+  // Jedes docker tag vergibt ein neues Tag; keins wird ein zweites Mal vergeben (das hieße: überschrieben).
+  assert.deepEqual(p.aufrufe("docker tag").map((aufruf) => aufruf.split(" ").at(-1)), refs);
+}), { skip: bashUndMake });
+
+pruefung("Image und Deploy", "make deploy überträgt genau das gebaute Tag, nie latest (AK5)", [], () => mitPlatzhaltern((p) => {
+  const result = p.run("make", ["-s", "deploy", "VM=vm.example.invalid"], {
+    cwd: deployKopie(p.dir), OWNER_REPO: "hka/selbsttest-app", BAUZEIT: "2026-11-25T14:30:00+01:00",
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const ref = "selbsttest-app:test-20261125-1430";
+  assert.deepEqual(p.aufrufe("docker save"), [`docker save ${ref}`]);
+  const remote = p.remote();
+  assert.ok(remote.includes("sudo docker images selbsttest-app\n"), "docker images fehlt auf der VM");
+  assert.ok(remote.includes(`  ${ref} >/dev/null`), "docker run startet ein anderes Image");
+  assert.ok(!(p.log() + remote).includes("latest"), "latest kommt vor");
+}), { skip: bashUndMake });
+
+const IMAGES = {
+  "latest": ["ghcr.io/hka/app:latest", false],
+  "ohne-tag": ["ghcr.io/hka/app", false],
+  "latest-mit-digest": [`ghcr.io/hka/app:latest@${DIGEST}`, false],
+  "digest": [`ghcr.io/hka/app@${DIGEST}`, true],
+  "festes-tag": ["ghcr.io/hka/app:sha-1a2b3c4", true],
+};
+
+pruefung("Image und Deploy", "make deploy mit IMAGE: festes Tag oder Digest, nie latest (AK5)", [], (fall) => mitPlatzhaltern((p) => {
+  const [image, erlaubt] = IMAGES[fall];
+  const result = p.run("make", ["-s", "deploy", "VM=vm.example.invalid", `IMAGE=${image}`], {
+    cwd: deployKopie(p.dir), OWNER_REPO: "hka/selbsttest-app",
+  });
+  if (erlaubt) {
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.deepEqual(p.aufrufe("docker save"), [`docker save ${image}`]);
+    assert.ok(p.remote().includes("sudo docker images ghcr.io/hka/app\n"), "docker images fehlt auf der VM");
+  } else {
+    assert.notEqual(result.status, 0);
+    assert.ok(result.stderr.includes("latest"), result.stderr);
+    assert.deepEqual([...p.aufrufe("docker pull"), ...p.aufrufe("docker save")], []);
+  }
+}), { cases: Object.keys(IMAGES), skip: bashUndMake });
+
+pruefung("Image und Deploy", "Echter Build: Labels per docker inspect, Zähler -2, erstes Image bleibt (AK3, AK4)", [], () => {
+  const name = `gold-js-selftest-${process.pid}`;
+  const inspect = (ref) => {
+    const result = run("docker", ["image", "inspect", ref]);
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout)[0];
+  };
+  const refs = [];
+  const ids = [];
+  try {
+    for (const bauzeit of ["2026-11-25T14:30:00+01:00", "2026-11-25T14:30:30+01:00"]) {
+      const result = run("bash", ["tools/build-image.sh", name], { env: { ...sauberesEnv(), BAUZEIT: bauzeit }, timeout: 900_000 });
+      assert.equal(result.status, 0, result.stderr.slice(-3000));
+      refs.push(result.stdout.trim());
+      ids.push(inspect(refs.at(-1)).Id);
+    }
+    assert.deepEqual(refs, [`${name}:test-20261125-1430`, `${name}:test-20261125-1430-2`]);
+    assert.notEqual(ids[0], ids[1]);
+    assert.equal(inspect(refs[0]).Id, ids[0], "das erste Image ist überschrieben");
+    const labels = refs.map((ref) => inspect(ref).Config.Labels);
+    assert.equal(labels[0]["org.opencontainers.image.created"], "2026-11-25T14:30:00+01:00");
+    assert.equal(labels[1]["org.opencontainers.image.created"], "2026-11-25T14:30:30+01:00");
+    assert.equal(labels[0]["org.opencontainers.image.revision"], gitRevision());
+  } finally {
+    if (refs.length > 0) run("docker", ["rmi", ...refs]);
+  }
+}, { skip: dockerSkip });
+
 // ── Gleichlauf mit dem Python-Golden-Master (HKA-44, Kriterium 9) ────────────
 
 const skipPy = fs.existsSync(PY_ROOT) ? false : "awp-hka-gold-python liegt nicht neben diesem Repository";
@@ -337,6 +562,11 @@ pruefung("Gleichlauf mit Python", "Gleiche Pflichtdateien, gleiches Manifest, gl
   assert.deepEqual(readJson("manifest.json"), JSON.parse(pyText("manifest.json")));
   assert.equal(readText("platform_sdk/VERSION"), pyText("platform_sdk/VERSION"));
 }, { skip: skipPy });
+
+pruefung("Gleichlauf mit Python", "tools/deploy.sh und tools/build-image.sh gleich (HKA-65)", [], (file) => {
+  assert.ok(fs.existsSync(path.join(PY_ROOT, file)), `${file} fehlt in awp-hka-gold-python`);
+  assert.ok(fs.readFileSync(path.join(ROOT, file)).equals(fs.readFileSync(path.join(PY_ROOT, file))), `${file} weicht ab`);
+}, { cases: ["tools/deploy.sh", "tools/build-image.sh"], skip: skipPy });
 
 pruefung("Gleichlauf mit Python", "Gleiche Prüfbereiche im Prüfbericht", [], () => {
   const own = (file) => fs.readFileSync(path.join(ROOT, "tools", "tests", file), "utf-8");
