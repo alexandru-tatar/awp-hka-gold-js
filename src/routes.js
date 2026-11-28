@@ -8,7 +8,7 @@ nunjucks.configure(path.join(__dirname, "views"), { autoescape: true });
 // Alle Texte der Seite auf Deutsch und Englisch (Regel R-UI-7); portal.language(req) nennt die Sprache der Person.
 const TEXTS = {
   de: { title: "Meine App", lead: "Hier entsteht Ihre Anwendung." },
-  en: { title: "My app", lead: "Your application is being built here." },
+  en: { title: "My app", lead: "Your app is being built here." },
 };
 
 function buildRouter(portal) {
