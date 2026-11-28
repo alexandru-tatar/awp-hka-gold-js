@@ -3,7 +3,6 @@
 # Wartung: make lock | sdk-update
 # Selbsttests des Golden Master (Plattform-Team): make check | check-skills | check-starter
 
-IMAGE ?= hka/portal-app:0.1.0
 # Gebaute SDK-Kopie aus dem Portal-Repository (dort: make sdk-release)
 SDK_DIST ?= ../portal/sdk/dist/javascript/platform_sdk
 
@@ -21,8 +20,8 @@ test:    ## automatische Tests
 lint:    ## Regeln prüfen (ESLint, Portal-Bibliothek)
 	npm run lint
 
-docker:  ## Container bauen
-	docker build --tag $(IMAGE) .
+docker:  ## Container bauen: <slug>:test-JJJJMMTT-HHMM, Produktiv-Build: make docker STUFE=prod (tools/build-image.sh)
+	bash tools/build-image.sh
 
 deploy:  ## App auf die Test-VM bringen: make deploy VM=<host> (tools/deploy.sh)
 	bash tools/deploy.sh
